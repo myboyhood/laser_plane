@@ -37,6 +37,12 @@ distCoeffs = np.zeros((5), dtype=np.float)
 outputRvecRaw = np.zeros((3), dtype=float)
 outputTvecRaw = np.zeros((3), dtype=float)
 
+left_glo = np.array([0,0])
+right_glo = np.array([0,0])
+up_glo = np.array([0,0])
+down_glo = np.array([0,0])
+
+
 # wzy global variable end <<<
 
 logging.basicConfig(format="[ %(levelname)s ] %(message)s", level=logging.INFO, stream=sys.stdout)
@@ -180,29 +186,116 @@ def intersection_over_union(box_1, box_2):
     return area_of_overlap / area_of_union
 
 
-def get_points(src):
+def get_contours_center(img):
+    contours, hierarchy= cv2.findContours(img,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+    x_sum = 0
+    y_sum = 0
+    success = False
+    if len(contours) == 1:
+        data = np.squeeze(contours)
+        print(data)
+        for i in data:
+            x,y = i
+            # print('x: ', x,'   y: ,', y)
+            x_sum = x_sum + x
+            y_sum = y_sum + y
+        x_center = int(x_sum*1.0/len(data))
+        y_center = int(y_sum*1.0/len(data))
+        print('x_center: ', x_center, 'y_center: ', y_center)
+        # if len(contours) == 1:
+        success = True
+        return success,x_center,y_center
 
-
-
-
-def find_img_pts(src):
-    stage = get_points(src)
-    if stage == 1:
-        print('detect target but not correct number of marker')
-        return True
-    elif stage == 2:
-        # TO DO
-        return True
-
-def track_apply(src,pose_raw):
-    global enable_pnp, objectPts, imgPts, cameraMatrix, distCoeffs, outputRvecRaw, outputTvecRaw
-    img_pts_success = find_img_pts(src)
-    if img_pts_success:
-        print('detect or follow Pts success')
     else:
-        print('follow Pts fail')
-    if enable_pnp:
-        cv2.solvePnP(objectPts, imgPts, cameraMatrix, distCoeffs, outputRvecRaw, outputTvecRaw)
+        x_center = 0
+        y_center = 0
+        return success,x_center,y_center
+
+
+def find_img_pts(src,x_corner,y_corner):
+    global left_glo,  right_glo,  up_glo, down_glo, enable_pnp
+    print('shape: ', src.shape)
+    height,width,channel = src.shape
+    center = np.array([int(height/2.0),int(width/2.0)]) # height y first ,width x second
+    print(center)
+
+    hori_left_up_corner = np.array([int(center[0]-height/5.0),0])
+    verti_left_up_corner = np.array([0,int(center[1]-width/5.0)])
+    hori_left_band = src[int(center[0]-height/5.0):int(center[0]+height/5.0), 0:int(width/2.0)]
+    hori_right_band = src[int(center[0]-height/5.0):int(center[0]+height/5.0), int(width/2.0):width]
+    verti_up_band = src[0:int(height/2.0) , int(center[1]-width/5.0):int(center[1]+width/5.0)]
+    verti_down_band = src[int(height/2.0):height , int(center[1]-width/5.0):int(center[1]+width/5.0)]
+
+    hori_left_hsv = cv2.cvtColor(hori_left_band,cv2.COLOR_BGR2HSV)
+    hori_right_hsv = cv2.cvtColor(hori_right_band,cv2.COLOR_BGR2HSV)
+    verti_up_hsv = cv2.cvtColor(verti_up_band,cv2.COLOR_BGR2HSV)
+    verti_down_hsv = cv2.cvtColor(verti_down_band,cv2.COLOR_BGR2HSV)
+    hori_lower_hsv = np.array([0,50,50])
+    hori_upper_hsv = np.array([30,255,255])
+    verti_lower_hsv = np.array([0,50,50])
+    verti_upper_hsv = np.array([100,255,255])
+
+    hori_left_mask = cv2.inRange(hori_left_hsv, hori_lower_hsv, hori_upper_hsv)
+    hori_right_mask = cv2.inRange(hori_right_hsv, hori_lower_hsv, hori_upper_hsv)
+    verti_up_mask = cv2.inRange(verti_up_hsv, verti_lower_hsv, verti_upper_hsv)
+    verti_down_mask = cv2.inRange(verti_down_hsv, verti_lower_hsv, verti_upper_hsv)
+
+    # erode and dilate
+    erode_kernel = np.ones((2, 2), np.uint8)
+    hori_left_erosion = cv2.erode(hori_left_mask, erode_kernel, iterations=1)
+    hori_right_erosion = cv2.erode(hori_right_mask, erode_kernel, iterations=1)
+    verti_up_erosion = cv2.erode(verti_up_mask, erode_kernel, iterations=1)
+    verti_down_erosion = cv2.erode(verti_down_mask, erode_kernel, iterations=1)
+    #cv2.imshow('hori_erosion', hori_erosion)
+    #cv2.imshow('verti_erosion', verti_erosion)
+
+    dilate_kernel = np.ones((5, 5), np.uint8)
+    hori_left_dilate = cv2.dilate(hori_left_erosion, dilate_kernel, iterations=1)
+    hori_right_dilate = cv2.dilate(hori_right_erosion, dilate_kernel, iterations=1)
+    verti_up_dilate = cv2.dilate(verti_up_erosion, dilate_kernel, iterations=1)
+    verti_down_dilate = cv2.dilate(verti_down_erosion, dilate_kernel, iterations=1)
+    # cv2.imshow('hori_left_dilate', hori_left_dilate)
+    # cv2.imshow('hori_right_dilate', hori_right_dilate)
+    # cv2.imshow('verti_up_dilate', verti_up_dilate)
+    # cv2.imshow('verti_down_dilate', verti_down_dilate)
+    left_state,left_x,left_y = get_contours_center(hori_left_dilate)
+    right_state,right_x,right_y = get_contours_center(hori_right_dilate)
+    up_state,up_x,up_y = get_contours_center(verti_up_dilate)
+    down_state,down_x,down_y = get_contours_center(verti_down_dilate)
+
+    print(left_state,'y: ',left_y,' x: ',left_x)
+    print(right_state,'y: ',right_y,' x: ',right_x)
+    print(up_state,'y: ',up_y ,' x: ',up_x )
+    print(down_state,'y: ',down_y ,' x: ',down_x)
+    # calculate pixels of the origin image
+    left_glo = np.array([x_corner+left_x, y_corner+int(center[0]-height/5.0)+left_y])
+    right_glo = np.array([x_corner+int(width/2.0)+right_x, y_corner+int(center[0]-height/5.0)+right_y])
+    up_glo = np.array([x_corner+int(center[1]-width/5.0)+up_x, y_corner+right_y])
+    down_glo = np.array([x_corner+int(center[1]-width/5.0)+down_x, y_corner+int(height/2.0)+down_y])
+
+    if left_state or right_state or up_state or down_state:
+        print('detect target , number of marker is wrong!!!')
+        return True
+    if left_state and right_state and up_state and down_state:
+        print('!!! detect target  !!!  correct number of marker !!!')
+        enable_pnp = True
+        return True
+    else:
+        print('not detect target marker ......')
+        return False
+
+
+def track_apply(src,x_corner,y_corner): # x_corner,y_corner for the pixel of left_up corner of cropped img
+    global left_glo, right_glo, up_glo, down_glo, enable_pnp, objectPts, imgPts, cameraMatrix, distCoeffs, outputRvecRaw, outputTvecRaw
+    enable_pnp = False
+    img_pts_success = find_img_pts(src,x_corner,y_corner)
+
+    if img_pts_success:
+        print('detect success')
+    else:
+        print('detect Pts fail')
+    # if enable_pnp:
+        #cv2.solvePnP(objectPts, imgPts, cameraMatrix, distCoeffs, outputRvecRaw, outputTvecRaw)
     # TO DO
 
 def main():
@@ -389,12 +482,22 @@ def main():
             # crop_img = np.zeros((frame.shape[0],frame.shape[1]), dtype=np.uint8)
 
 
-            w_min = obj['xmin'] - 10 if obj['xmin'] - 10> 0 else 0
-            w_max = obj['xmax'] + 10if obj['xmax'] + 10< 640 else 640
-            h_min = obj['ymin'] - 10 if obj['ymin'] - 10 > 0 else 0
-            h_max = obj['ymax'] + 10 if obj['ymax'] + 10 < 480 else 480
+            w_min = obj['xmin']  if obj['xmin'] > 0 else 0
+            w_max = obj['xmax'] if obj['xmax'] < 640 else 640
+            h_min = obj['ymin']  if obj['ymin']  > 0 else 0
+            h_max = obj['ymax']  if obj['ymax']  < 480 else 480
             #crop_img = crop_img[obj['xmin']:obj['xmax']+100, obj['ymin']:obj['ymax']+100]
+
             crop_img = crop_img[h_min:h_max, w_min:w_max] # first height, second width
+            track_apply(crop_img,w_min,h_min)
+
+            print('left_glo: ', left_glo)
+
+            cv2.circle(frame,(left_glo[0],left_glo[1]),10,(240,0,0),3)
+            cv2.circle(frame,(right_glo[0],right_glo[1]),10,(0,240,0),3)
+            cv2.circle(frame,(up_glo[0],up_glo[1]),10,(0,0,240),3)
+            cv2.circle(frame,(down_glo[0],down_glo[1]),10,(150,100,100),3)
+            cv2.imshow('track',frame)
             #crop_img = crop_img[10:141, 390:440]
 
             #crop_img = crop_img[100:400, 100:400]
