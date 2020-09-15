@@ -1,4 +1,0 @@
-[ WARN] [1579224660.293392691]: TM : RTT too high for timesync: 65.80 ms.
-这样的警告是时间不同步导致的，
-/home/uav/mavros_ws/src/mavros/mavros/src/plugins/sys_time.cpp 418 line
-我在367 line多乘10，想max_rtt变大10倍
